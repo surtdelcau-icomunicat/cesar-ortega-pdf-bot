@@ -1,4 +1,3 @@
-
 import os
 import logging
 from dotenv import load_dotenv
@@ -10,7 +9,7 @@ from PIL import Image
 import io
 import requests
 from datetime import datetime
-#from rembg import remove
+from rembg import remove
 import tempfile
 
 # Cargar variables de entorno
@@ -77,13 +76,12 @@ class OfferBot:
             
             # Procesar con rembg (eliminar fondo)
             try:
-                #input_img = Image.open(photo_path)
-                #output_img = remove(input_img)
+                input_img = Image.open(photo_path)
+                output_img = remove(input_img)
                 
                 # Guardar con fondo eliminado
-                #output_path = photo_path.replace('.jpg', '_processed.png')
-                #output_img.save(output_path)
-                output_path = photo_path
+                output_path = photo_path.replace('.jpg', '_processed.png')
+                output_img.save(output_path)
                 
                 self.user_data[user_id]['products'].append({
                     'original_path': photo_path,
@@ -235,7 +233,7 @@ class OfferBot:
         try:
             # Descargar logo
             if not self.logo_path:
-                logo_url = "https://raw.githubusercontent.com/suministraces/cesar-ortega-pdf-bot/main/cesar-logo-h.png"
+                logo_url = "https://raw.githubusercontent.com/suministraces/cesar-ortega-pdf-bot/main/logo.jpg"
                 try:
                     logo_response = requests.get(logo_url)
                     temp_logo = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
