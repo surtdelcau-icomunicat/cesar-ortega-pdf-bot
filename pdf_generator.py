@@ -29,11 +29,11 @@ class PDFOfferGenerator:
         try:
             if os.path.exists(self.logo_path):
                 pdf_canvas.drawImage(self.logo_path, 
-                                    self.margin, 
-                                    self.page_height - 2.2*cm, 
-                                    width=1.8*cm, 
-                                    height=1.8*cm,
-                                    preserveAspectRatio=True)
+                    self.margin, 
+                    self.page_height - 2.2*cm, 
+                    width=2.2*cm, 
+                    height=1.8*cm,
+                    preserveAspectRatio=True)
         except Exception as e:
             print(f"Error cargando logo: {e}")
         
