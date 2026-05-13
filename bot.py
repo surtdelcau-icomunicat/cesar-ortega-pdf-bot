@@ -77,12 +77,13 @@ class OfferBot:
             
             # Procesar con rembg (eliminar fondo)
             try:
-                input_img = Image.open(photo_path)
-                output_img = remove(input_img)
+                #input_img = Image.open(photo_path)
+                #output_img = remove(input_img)
                 
                 # Guardar con fondo eliminado
-                output_path = photo_path.replace('.jpg', '_processed.png')
-                output_img.save(output_path)
+                #output_path = photo_path.replace('.jpg', '_processed.png')
+                #output_img.save(output_path)
+                output_path = photo_path
                 
                 self.user_data[user_id]['products'].append({
                     'original_path': photo_path,
