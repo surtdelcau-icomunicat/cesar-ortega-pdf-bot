@@ -30,7 +30,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'products': [],
         'prices': {},
         'final_prices': {},
-        'current_price_index': 0
+        'current_price_index': 0,
+        'orientation': 'landscape'
     }
     await update.message.reply_text(
         "👋 ¡Bienvenido a CESAR ORTEGA PDF Offers!\n\n"
@@ -42,7 +43,8 @@ async def receive_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in user_data:
         user_data[user_id] = {
             'products': [], 'prices': {},
-            'final_prices': {}, 'current_price_index': 0
+            'final_prices': {}, 'current_price_index': 0,
+            'orientation': 'landscape'
         }
     try:
         photo_file = await update.message.photo[-1].get_file()
@@ -78,22 +80,41 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx += 1
         user_data[user_id]['current_price_index'] = idx
         if idx < len(user_data[user_id]['products']):
-            await update.message.reply_text(f"✅ OK\n\nFoto {idx + 1}: ¿Precio?")
+            await update.message.reply_text(f"✅ OK\n\nFoto {idx + 1}: ¿Precio (sin IVA)?")
         else:
-            text = "📋 Resumen:\n\n"
+            text = "📋 Resumen (precios sin IVA):\n\n"
             for i in range(len(user_data[user_id]['products'])):
-                text += f"Foto {i+1}: {user_data[user_id]['prices'][i]}€\n"
+                text += f"Foto {i+1}: {user_data[user_id]['prices'][i]:.2f} €\n"
             keyboard = [
                 [InlineKeyboardButton("➕ +10%", callback_data='increase_10')],
                 [InlineKeyboardButton("➕ +15%", callback_data='increase_15')],
                 [InlineKeyboardButton("❌ Sin aumento", callback_data='increase_none')]
             ]
             await update.message.reply_text(
-                text + "\n¿Aumentar?",
+                text + "\n¿Aumentar precios?",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
     except ValueError:
         await update.message.reply_text("❌ Formato: 15.50")
+
+async def ask_format(query, context, user_id):
+    """Pregunta el formato del PDF"""
+    keyboard = [
+        [InlineKeyboardButton("📄 Horizontal (3x2)", callback_data='format_landscape')],
+        [InlineKeyboardButton("📃 Vertical (2x4)", callback_data='format_portrait')]
+    ]
+    
+    n_products = len(user_data[user_id]['products'])
+    pages_h = (n_products + 5) // 6
+    pages_v = (n_products + 7) // 8
+    
+    text = (
+        "📐 ¿Qué formato quieres para el PDF?\n\n"
+        f"📄 *Horizontal*: 6 productos/página → {pages_h} página(s)\n"
+        f"📃 *Vertical*: 8 productos/página → {pages_v} página(s)"
+    )
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -105,8 +126,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Sube fotos primero")
             return
         user_data[user_id]['current_price_index'] = 0
-        await query.edit_message_text("💰 Envía precios (ej: 15.50)")
-        await context.bot.send_message(chat_id=user_id, text="Foto 1: ¿Precio?")
+        await query.edit_message_text("💰 Envía precios sin IVA (ej: 15.50)\nEl IVA del 21% se añadirá automáticamente")
+        await context.bot.send_message(chat_id=user_id, text="Foto 1: ¿Precio (sin IVA)?")
 
     elif query.data == 'more_photos':
         await query.edit_message_text("📸 Sube más fotos")
@@ -119,6 +140,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pct = float(option) / 100
             for idx, price in user_data[user_id]['prices'].items():
                 user_data[user_id]['final_prices'][idx] = round(price * (1 + pct), 2)
+        
+        # Ahora preguntar formato
+        await ask_format(query, context, user_id)
+
+    elif query.data.startswith('format_'):
+        orientation = query.data.replace('format_', '')
+        user_data[user_id]['orientation'] = orientation
         await generate_pdf(query, context, user_id)
 
 async def generate_pdf(query, context, user_id):
@@ -145,9 +173,10 @@ async def generate_pdf(query, context, user_id):
             })
 
         fecha = datetime.now().strftime("%d-%m-%y")
+        orientation = user_data[user_id].get('orientation', 'landscape')
         output_path = f"/tmp/oferta_{fecha}_{user_id}.pdf"
 
-        generator = PDFOfferGenerator(logo_path)
+        generator = PDFOfferGenerator(logo_path, orientation=orientation)
         generator.generate_pdf(products, output_path)
 
         with open(output_path, 'rb') as f:
