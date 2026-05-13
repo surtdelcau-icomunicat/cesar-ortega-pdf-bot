@@ -234,7 +234,7 @@ class OfferBot:
         try:
             # Descargar logo
             if not self.logo_path:
-                logo_url = "https://raw.githubusercontent.com/suministraces/cesar-ortega-pdf-bot/main/logo.jpg"
+                logo_url = "https://raw.githubusercontent.com/suministraces/cesar-ortega-pdf-bot/main/cesar-logo-h.png"
                 try:
                     logo_response = requests.get(logo_url)
                     temp_logo = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
