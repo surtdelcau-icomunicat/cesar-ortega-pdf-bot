@@ -10,7 +10,7 @@ from PIL import Image
 import io
 import requests
 from datetime import datetime
-from rembg import remove
+#from rembg import remove
 import tempfile
 
 # Cargar variables de entorno
