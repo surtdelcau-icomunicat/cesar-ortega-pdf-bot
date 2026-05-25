@@ -22,30 +22,46 @@ RENDER_URL = os.getenv('RENDER_EXTERNAL_URL', '')
 
 user_data = {}
 
+# Estados posibles: 'uploading', 'naming', 'pricing'
+
+def init_user(user_id):
+    """Inicializa datos del usuario"""
+    user_data[user_id] = {
+        'products': [],
+        'names': {},
+        'prices': {},
+        'final_prices': {},
+        'current_index': 0,
+        'orientation': 'landscape',
+        'state': 'uploading'
+    }
+
 # ===== HANDLERS =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_data[user_id] = {
-        'products': [],
-        'prices': {},
-        'final_prices': {},
-        'current_price_index': 0,
-        'orientation': 'landscape'
-    }
+    init_user(user_id)
     await update.message.reply_text(
         "👋 ¡Bienvenido a CESAR ORTEGA PDF Offers!\n\n"
         "📸 Sube las fotos de los productos"
     )
 
+async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Saltar nombre en modo naming"""
+    user_id = update.effective_user.id
+    if user_id not in user_data:
+        return
+    
+    if user_data[user_id]['state'] == 'naming':
+        idx = user_data[user_id]['current_index']
+        user_data[user_id]['names'][idx] = f"Producto {idx + 1}"
+        await advance_naming(update, context, user_id)
+
 async def receive_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in user_data:
-        user_data[user_id] = {
-            'products': [], 'prices': {},
-            'final_prices': {}, 'current_price_index': 0,
-            'orientation': 'landscape'
-        }
+        init_user(user_id)
+    
     try:
         photo_file = await update.message.photo[-1].get_file()
         temp_dir = tempfile.mkdtemp()
@@ -68,53 +84,116 @@ async def receive_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error foto: {e}")
         await update.message.reply_text("❌ Error descargando")
 
+async def advance_naming(update_or_query, context, user_id):
+    """Avanza al siguiente nombre o pasa a precios"""
+    idx = user_data[user_id]['current_index']
+    idx += 1
+    user_data[user_id]['current_index'] = idx
+    
+    if idx < len(user_data[user_id]['products']):
+        msg = f"📝 Foto {idx + 1}: ¿Nombre?\n(o /skip para 'Producto {idx + 1}')"
+        await context.bot.send_message(chat_id=user_id, text=msg)
+    else:
+        # Pasar a precios
+        await start_pricing(context, user_id)
+
+async def start_pricing(context, user_id):
+    """Inicia la fase de precios"""
+    user_data[user_id]['state'] = 'pricing'
+    user_data[user_id]['current_index'] = 0
+    
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="💰 Ahora los precios sin IVA (ej: 15.50)\nEl IVA del 21% se añadirá automáticamente"
+    )
+    
+    name = user_data[user_id]['names'].get(0, "Producto 1")
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=f"{name}: ¿Precio (sin IVA)?"
+    )
+
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja texto según el estado"""
     user_id = update.effective_user.id
     if user_id not in user_data or not user_data[user_id]['products']:
         await update.message.reply_text("Usa /start para comenzar")
         return
-    try:
-        price = float(update.message.text.replace(',', '.'))
-        idx = user_data[user_id]['current_price_index']
-        user_data[user_id]['prices'][idx] = price
-        idx += 1
-        user_data[user_id]['current_price_index'] = idx
-        if idx < len(user_data[user_id]['products']):
-            await update.message.reply_text(f"✅ OK\n\nFoto {idx + 1}: ¿Precio (sin IVA)?")
-        else:
-            text = "📋 Resumen (precios sin IVA):\n\n"
-            for i in range(len(user_data[user_id]['products'])):
-                text += f"Foto {i+1}: {user_data[user_id]['prices'][i]:.2f} €\n"
-            keyboard = [
-                [InlineKeyboardButton("➕ +10%", callback_data='increase_10')],
-                [InlineKeyboardButton("➕ +15%", callback_data='increase_15')],
-                [InlineKeyboardButton("❌ Sin aumento", callback_data='increase_none')]
-            ]
-            await update.message.reply_text(
-                text + "\n¿Aumentar precios?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-    except ValueError:
-        await update.message.reply_text("❌ Formato: 15.50")
+    
+    state = user_data[user_id]['state']
+    text = update.message.text.strip()
+    
+    if state == 'naming':
+        # Guardar nombre
+        idx = user_data[user_id]['current_index']
+        # Limitar a 40 caracteres
+        name = text[:40] if len(text) > 40 else text
+        user_data[user_id]['names'][idx] = name
+        await update.message.reply_text(f"✅ '{name}' guardado")
+        await advance_naming(update, context, user_id)
+    
+    elif state == 'pricing':
+        # Guardar precio
+        try:
+            price = float(text.replace(',', '.'))
+            idx = user_data[user_id]['current_index']
+            user_data[user_id]['prices'][idx] = price
+            idx += 1
+            user_data[user_id]['current_index'] = idx
+            
+            if idx < len(user_data[user_id]['products']):
+                name = user_data[user_id]['names'].get(idx, f"Producto {idx + 1}")
+                await update.message.reply_text(f"✅ OK\n\n{name}: ¿Precio (sin IVA)?")
+            else:
+                # Mostrar resumen y preguntar aumento
+                resumen = "📋 Resumen (precios sin IVA):\n\n"
+                for i in range(len(user_data[user_id]['products'])):
+                    nombre = user_data[user_id]['names'].get(i, f"Producto {i+1}")
+                    precio = user_data[user_id]['prices'][i]
+                    resumen += f"• {nombre}: {precio:.2f} €\n"
+                
+                keyboard = [
+                    [InlineKeyboardButton("➕ +10%", callback_data='increase_10')],
+                    [InlineKeyboardButton("➕ +15%", callback_data='increase_15')],
+                    [InlineKeyboardButton("❌ Sin aumento", callback_data='increase_none')]
+                ]
+                await update.message.reply_text(
+                    resumen + "\n¿Aumentar precios?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        except ValueError:
+            await update.message.reply_text("❌ Formato: 15.50")
+
+async def ask_names(query, context, user_id):
+    """Pregunta si quiere poner nombres a los productos"""
+    n = len(user_data[user_id]['products'])
+    keyboard = [
+        [InlineKeyboardButton("📝 Sí, poner nombres", callback_data='names_yes')],
+        [InlineKeyboardButton("❌ No, dejar Producto 1, 2, 3...", callback_data='names_no')]
+    ]
+    await query.edit_message_text(
+        f"¿Quieres ponerle nombre a los {n} productos?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def ask_format(query, context, user_id):
     """Pregunta el formato del PDF"""
+    n_products = len(user_data[user_id]['products'])
+    pages_h = max(1, (n_products + 5) // 6) if n_products <= 9 else (n_products + 7) // 8
+    pages_v = max(1, (n_products + 7) // 8) if n_products <= 9 else (n_products + 7) // 8
+    
+    # Layouts dinámicos
+    h_info = "1 foto/pág" if n_products == 1 else f"{n_products} foto/pág" if n_products <= 3 else "auto"
+    v_info = "1 foto/pág" if n_products == 1 else f"{n_products} foto/pág" if n_products <= 3 else "auto"
+    
     keyboard = [
-        [InlineKeyboardButton("📄 Horizontal (3x2)", callback_data='format_landscape')],
-        [InlineKeyboardButton("📃 Vertical (2x4)", callback_data='format_portrait')]
+        [InlineKeyboardButton("📄 Horizontal", callback_data='format_landscape')],
+        [InlineKeyboardButton("📃 Vertical", callback_data='format_portrait')]
     ]
     
-    n_products = len(user_data[user_id]['products'])
-    pages_h = (n_products + 5) // 6
-    pages_v = (n_products + 7) // 8
+    text = f"📐 ¿Qué formato quieres para el PDF?\n\nLayout adaptado a {n_products} producto(s)"
     
-    text = (
-        "📐 ¿Qué formato quieres para el PDF?\n\n"
-        f"📄 *Horizontal*: 6 productos/página → {pages_h} página(s)\n"
-        f"📃 *Vertical*: 8 productos/página → {pages_v} página(s)"
-    )
-    
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -125,12 +204,31 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user_data.get(user_id, {}).get('products'):
             await query.edit_message_text("❌ Sube fotos primero")
             return
-        user_data[user_id]['current_price_index'] = 0
-        await query.edit_message_text("💰 Envía precios sin IVA (ej: 15.50)\nEl IVA del 21% se añadirá automáticamente")
-        await context.bot.send_message(chat_id=user_id, text="Foto 1: ¿Precio (sin IVA)?")
+        # Preguntar si quiere nombres
+        await ask_names(query, context, user_id)
 
     elif query.data == 'more_photos':
         await query.edit_message_text("📸 Sube más fotos")
+
+    elif query.data == 'names_yes':
+        # Iniciar fase de nombres
+        user_data[user_id]['state'] = 'naming'
+        user_data[user_id]['current_index'] = 0
+        await query.edit_message_text(
+            "📝 Vamos a poner nombre a cada producto\n"
+            "(escribe el nombre o /skip para mantener 'Producto N')"
+        )
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="📝 Foto 1: ¿Nombre?\n(o /skip para 'Producto 1')"
+        )
+
+    elif query.data == 'names_no':
+        # Saltar nombres, asignar default e ir a precios
+        for i in range(len(user_data[user_id]['products'])):
+            user_data[user_id]['names'][i] = f"Producto {i + 1}"
+        await query.edit_message_text("👍 OK, sin nombres personalizados")
+        await start_pricing(context, user_id)
 
     elif query.data.startswith('increase_'):
         option = query.data.replace('increase_', '')
@@ -140,8 +238,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pct = float(option) / 100
             for idx, price in user_data[user_id]['prices'].items():
                 user_data[user_id]['final_prices'][idx] = round(price * (1 + pct), 2)
-        
-        # Ahora preguntar formato
         await ask_format(query, context, user_id)
 
     elif query.data.startswith('format_'):
@@ -168,7 +264,7 @@ async def generate_pdf(query, context, user_id):
         for i in range(len(user_data[user_id]['products'])):
             products.append({
                 'image_path': user_data[user_id]['products'][i]['path'],
-                'name': f'Producto {i+1}',
+                'name': user_data[user_id]['names'].get(i, f"Producto {i+1}"),
                 'price': user_data[user_id]['final_prices'].get(i, 0)
             })
 
@@ -202,6 +298,7 @@ def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('skip', skip_command))
     application.add_handler(MessageHandler(filters.PHOTO, receive_photos))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text))
     application.add_handler(CallbackQueryHandler(button_callback))
