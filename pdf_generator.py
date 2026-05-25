@@ -23,24 +23,83 @@ IVA_RATE = 0.21
 class PDFOfferGenerator:
     def __init__(self, logo_path, orientation='landscape'):
         """
-        orientation: 'landscape' (3x2=6 productos) o 'portrait' (2x4=8 productos)
+        orientation: 'landscape' o 'portrait'
+        El layout se calcula dinámicamente según número de productos
         """
         self.logo_path = logo_path
         self.orientation = orientation
         
         if orientation == 'portrait':
             self.page_width, self.page_height = portrait(A4)
-            self.cards_per_row = 2
-            self.rows_per_page = 4
         else:
             self.page_width, self.page_height = landscape(A4)
-            self.cards_per_row = 3
-            self.rows_per_page = 2
         
         self.margin = 1.2 * cm
 
+    def _calculate_layout(self, n_products):
+        """
+        Calcula el layout óptimo según el número de productos.
+        Devuelve (columnas, filas).
+        Aprovecha todo el ancho disponible.
+        """
+        if self.orientation == 'landscape':
+            # Horizontal (29.7cm ancho x 21cm alto)
+            if n_products == 1:
+                return (1, 1)
+            elif n_products == 2:
+                return (2, 1)
+            elif n_products == 3:
+                return (3, 1)
+            elif n_products == 4:
+                return (2, 2)
+            elif n_products <= 6:
+                return (3, 2)
+            elif n_products <= 8:
+                return (4, 2)
+            elif n_products == 9:
+                return (3, 3)
+            else:
+                # 10+ productos: paginación con 4x2
+                return (4, 2)
+        else:
+            # Vertical (21cm ancho x 29.7cm alto)
+            if n_products == 1:
+                return (1, 1)
+            elif n_products == 2:
+                return (1, 2)
+            elif n_products == 3:
+                return (1, 3)
+            elif n_products == 4:
+                return (2, 2)
+            elif n_products <= 6:
+                return (2, 3)
+            elif n_products <= 8:
+                return (2, 4)
+            elif n_products == 9:
+                return (3, 3)
+            else:
+                # 10+ productos: paginación con 2x4
+                return (2, 4)
+
+    def _get_font_sizes(self, card_width, card_height):
+        """
+        Ajusta tamaños de fuente según el tamaño de la card.
+        Cards más grandes → fuentes más grandes.
+        """
+        # Tamaño base
+        base_width = 9 * cm  # ancho de referencia
+        scale = min(card_width / base_width, 1.5)  # max 1.5x
+        scale = max(scale, 0.7)  # min 0.7x
+        
+        return {
+            'name': int(10 * scale),
+            'price_no_iva': int(8 * scale),
+            'price_iva': int(14 * scale),
+            'iva_label': int(7 * scale)
+        }
+
     def _draw_header(self, c, page_num=1, total_pages=1):
-        """Header profesional"""
+        """Header"""
         header_height = 3 * cm
 
         c.setFillColor(COLOR_PRIMARY)
@@ -49,7 +108,6 @@ class PDFOfferGenerator:
         c.setFillColor(COLOR_PRIMARY_DARK)
         c.rect(0, self.page_height - header_height - 0.15*cm, self.page_width, 0.15*cm, fill=1, stroke=0)
 
-        # Logo
         logo_size = 2*cm
         logo_x = self.margin
         logo_y = self.page_height - header_height + (header_height - logo_size) / 2
@@ -67,13 +125,11 @@ class PDFOfferGenerator:
             except Exception as e:
                 print(f"Error logo: {e}")
 
-        # Nombre empresa
         text_x = logo_x + logo_size + 0.8*cm
         text_y_center = self.page_height - header_height/2
 
         c.setFillColor(COLOR_WHITE)
         
-        # Ajustar tamaño según orientación
         if self.orientation == 'portrait':
             company_font_size = 18
             offer_font_size = 22
@@ -88,14 +144,12 @@ class PDFOfferGenerator:
         c.setFillColor(HexColor("#B8C5E0"))
         c.drawString(text_x, text_y_center - 0.5*cm, "Suministraments Industrials")
 
-        # OFERTA
         c.setFillColor(COLOR_WHITE)
         c.setFont("Helvetica-Bold", offer_font_size)
         offer_text = "OFERTA"
         offer_width = c.stringWidth(offer_text, "Helvetica-Bold", offer_font_size)
         c.drawString(self.page_width - self.margin - offer_width, text_y_center + 0.1*cm, offer_text)
 
-        # Fecha
         fecha = datetime.now().strftime("%d/%m/%Y")
         c.setFont("Helvetica", 10)
         c.setFillColor(HexColor("#B8C5E0"))
@@ -104,7 +158,7 @@ class PDFOfferGenerator:
         c.drawString(self.page_width - self.margin - fecha_width, text_y_center - 0.5*cm, fecha_text)
 
     def _draw_footer(self, c, page_num=1, total_pages=1):
-        """Footer compacto y limpio"""
+        """Footer compacto"""
         footer_y = 1.8 * cm
 
         c.setStrokeColor(COLOR_PRIMARY)
@@ -114,7 +168,6 @@ class PDFOfferGenerator:
         c.setFillColor(COLOR_PRIMARY)
         c.rect(self.margin, footer_y - 0.05*cm, 3*cm, 0.1*cm, fill=1, stroke=0)
 
-        # Empresa
         c.setFont("Helvetica-Bold", 9)
         c.setFillColor(COLOR_PRIMARY)
         company_name = "CESAR ORTEGA SL"
@@ -125,7 +178,6 @@ class PDFOfferGenerator:
         c.setFillColor(COLOR_TEXT_LIGHT)
         c.drawString(self.margin + name_width + 0.3*cm, footer_y - 0.55*cm, "•  Suministros Industriales")
 
-        # Contacto (2 líneas)
         c.setFont("Helvetica", 8)
         c.setFillColor(COLOR_TEXT)
 
@@ -134,7 +186,6 @@ class PDFOfferGenerator:
         c.drawString(self.margin, footer_y - 1.25*cm, 
                     "Tel: 936 917 146  |  WhatsApp: +34 678 429 948  |  suministroscesarortega.com")
 
-        # Página
         c.setFont("Helvetica", 8)
         c.setFillColor(COLOR_TEXT_LIGHT)
         page_text = f"Página {page_num} de {total_pages}"
@@ -142,21 +193,29 @@ class PDFOfferGenerator:
         c.drawString(self.page_width - self.margin - page_width, footer_y - 0.55*cm, page_text)
 
     def _draw_product_card(self, c, product, x, y, width, height):
-        """Card con precio sin IVA y con IVA"""
+        """Card con precio sin IVA y con IVA, tamaños adaptativos"""
+        # Fuentes adaptativas
+        fonts = self._get_font_sizes(width, height)
+        
         # Sombra
         c.setFillColor(HexColor("#DDDDDD"))
         c.roundRect(x + 0.08*cm, y - 0.08*cm, width, height, 0.3*cm, fill=1, stroke=0)
 
-        # Fondo blanco
+        # Fondo
         c.setFillColor(COLOR_WHITE)
         c.setStrokeColor(COLOR_BORDER)
         c.setLineWidth(0.5)
         c.roundRect(x, y, width, height, 0.3*cm, fill=1, stroke=1)
 
-        # Zona imagen (65%)
-        img_zone_height = height * 0.65
-        img_zone_y = y + height - img_zone_height
+        # Calcular zona info según tamaño card
+        # Cards grandes: más zona imagen. Cards pequeñas: más zona texto proporcional
+        info_height = max(2.0*cm, height * 0.30)  # mínimo 2cm para texto
+        info_height = min(info_height, height * 0.45)  # máximo 45%
+        
+        img_zone_height = height - info_height
+        img_zone_y = y + info_height
 
+        # Fondo zona imagen
         c.setFillColor(COLOR_LIGHT_GRAY)
         c.roundRect(x + 0.15*cm, img_zone_y + 0.15*cm,
                    width - 0.3*cm, img_zone_height - 0.3*cm,
@@ -172,6 +231,9 @@ class PDFOfferGenerator:
                 padding = 0.4*cm
                 max_w = width - 0.6*cm - padding*2
                 max_h = img_zone_height - 0.6*cm - padding*2
+
+                if max_w <= 0 or max_h <= 0:
+                    return
 
                 if aspect > max_w / max_h:
                     draw_w = max_w
@@ -190,45 +252,50 @@ class PDFOfferGenerator:
             except Exception as e:
                 print(f"Error imagen: {e}")
 
-        # Zona info (35%)
-        info_y_base = y + 0.4*cm
-
+        # Zona info
+        info_y_top = y + info_height - 0.4*cm
+        
         # Nombre producto
-        c.setFont("Helvetica-Bold", 10)
+        c.setFont("Helvetica-Bold", fonts['name'])
         c.setFillColor(COLOR_SECONDARY)
         product_name = product.get('name', 'Producto')
         max_name_width = width - 0.6*cm
-        while c.stringWidth(product_name, "Helvetica-Bold", 10) > max_name_width and len(product_name) > 3:
+        while c.stringWidth(product_name, "Helvetica-Bold", fonts['name']) > max_name_width and len(product_name) > 3:
             product_name = product_name[:-1]
-        c.drawString(x + 0.4*cm, info_y_base + 1.5*cm, product_name)
+        c.drawString(x + 0.4*cm, info_y_top, product_name)
 
         # Línea separadora
         c.setStrokeColor(COLOR_PRIMARY)
         c.setLineWidth(1.5)
-        c.line(x + 0.4*cm, info_y_base + 1.35*cm, x + 1.2*cm, info_y_base + 1.35*cm)
+        c.line(x + 0.4*cm, info_y_top - 0.15*cm, x + 1.2*cm, info_y_top - 0.15*cm)
 
-        # Precio sin IVA (pequeño, secundario)
+        # Precios
         price_no_iva = product['price']
         price_with_iva = round(price_no_iva * (1 + IVA_RATE), 2)
 
-        c.setFont("Helvetica", 8)
+        # Espaciado adaptativo
+        spacing_y = info_height / 4
+
+        # Sin IVA (pequeño)
+        c.setFont("Helvetica", fonts['price_no_iva'])
         c.setFillColor(COLOR_TEXT_LIGHT)
-        c.drawString(x + 0.4*cm, info_y_base + 0.85*cm, 
+        c.drawString(x + 0.4*cm, info_y_top - spacing_y - 0.2*cm, 
                     f"Sin IVA: {price_no_iva:.2f} €")
 
-        # Precio con IVA (grande, destacado)
-        c.setFont("Helvetica-Bold", 14)
+        # Con IVA (grande, destacado)
+        c.setFont("Helvetica-Bold", fonts['price_iva'])
         c.setFillColor(COLOR_PRIMARY)
-        c.drawString(x + 0.4*cm, info_y_base + 0.2*cm, 
+        c.drawString(x + 0.4*cm, info_y_top - spacing_y * 2 - 0.3*cm, 
                     f"{price_with_iva:.2f} €")
 
-        # Etiqueta "IVA incluido"
-        c.setFont("Helvetica-Oblique", 7)
+        # IVA incluido
+        c.setFont("Helvetica-Oblique", fonts['iva_label'])
         c.setFillColor(COLOR_TEXT_LIGHT)
-        c.drawString(x + 0.4*cm, info_y_base - 0.15*cm, "IVA incluido (21%)")
+        c.drawString(x + 0.4*cm, info_y_top - spacing_y * 2 - 0.7*cm, 
+                    "IVA incluido (21%)")
 
     def generate_pdf(self, products, output_path):
-        """Genera PDF con paginación automática"""
+        """Genera PDF con layout dinámico según número de productos"""
         if self.orientation == 'portrait':
             pagesize = portrait(A4)
         else:
@@ -236,9 +303,13 @@ class PDFOfferGenerator:
         
         c = canvas.Canvas(output_path, pagesize=pagesize)
 
-        cards_per_page = self.cards_per_row * self.rows_per_page
-        total_pages = (len(products) + cards_per_page - 1) // cards_per_page
+        # Calcular layout óptimo
+        n_products = len(products)
+        cards_per_row, rows_per_page = self._calculate_layout(n_products)
+        cards_per_page = cards_per_row * rows_per_page
+        total_pages = (n_products + cards_per_page - 1) // cards_per_page
 
+        # Áreas
         header_height = 3.15 * cm
         footer_height = 2.5 * cm
         content_top = self.page_height - header_height - 0.5*cm
@@ -247,10 +318,10 @@ class PDFOfferGenerator:
 
         usable_width = self.page_width - (2 * self.margin)
         padding_x = 0.5 * cm
-        card_width = (usable_width - (self.cards_per_row - 1) * padding_x) / self.cards_per_row
+        card_width = (usable_width - (cards_per_row - 1) * padding_x) / cards_per_row
 
         padding_y = 0.5 * cm
-        card_height = (content_height - (self.rows_per_page - 1) * padding_y) / self.rows_per_page
+        card_height = (content_height - (rows_per_page - 1) * padding_y) / rows_per_page
 
         current_page = 1
         self._draw_header(c, current_page, total_pages)
@@ -266,10 +337,10 @@ class PDFOfferGenerator:
             self._draw_product_card(c, product, x, y, card_width, card_height)
 
             col += 1
-            if col >= self.cards_per_row:
+            if col >= cards_per_row:
                 col = 0
                 row += 1
-                if row >= self.rows_per_page and i < len(products) - 1:
+                if row >= rows_per_page and i < n_products - 1:
                     c.showPage()
                     current_page += 1
                     self._draw_header(c, current_page, total_pages)
@@ -277,4 +348,4 @@ class PDFOfferGenerator:
                     row = 0
 
         c.save()
-        print(f"PDF generado: {output_path}")
+        print(f"PDF generado: {output_path} ({cards_per_row}x{rows_per_page}, {total_pages} pág)")
